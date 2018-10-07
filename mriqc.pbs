@@ -7,4 +7,4 @@
 
 #COMMANDS TO RUN
 module load singularity
-singularity run --cleanenv /fs/project/huskey.29/flow_dynamic/singularity_images/poldracklab_mriqc_0.14.2-2018-08-21-0f8229583796.img /fs/project/huskey.29/flow_dynamic/bids_nii/ /fs/project/huskey.29/flow_dynamic/mriqc_output/ participant --participant-label 005 006 007 008 009 011 012 013 014 015 016 017 018 019 020 021 022 023 024 025 026 028 029 030 031 032 033 034 035 036 037 039 040 041 042 -w /fs/project/huskey.29/flow_dynamic/mriqc_work/
+singularity run --cleanenv /fs/project/huskey.29/flow_dynamic/singularity_images/poldracklab_mriqc_0.14.2-2018-08-21-0f8229583796.img /fs/project/huskey.29/flow_dynamic/bids_nii/ /fs/project/huskey.29/flow_dynamic/mriqc_output/ participant -w /fs/project/huskey.29/flow_dynamic/mriqc_work/ --n_procs 48
