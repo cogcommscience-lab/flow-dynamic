@@ -7,7 +7,7 @@
 clc;
 close all;
 clear;
-load(['/data/time_series/output_01608_gsr_seitzman.mat']);
+load(['/data/time_series/output_gsr_seitzman.mat']);
 
 % load the the adjacency matrices, then store them in a 5-d array
 M_bore = cat(4, bore.win_1, bore.win_2, bore.win_3, bore.win_4);
@@ -18,18 +18,23 @@ M = permute(M, [1 5 4 2 3]);
 
 % construct mean graph from the set of graph for all individuals
 M = squeeze(mean(M, 1));
-M_weight = squeeze(mean(M_weight, 1));
 
 
-for i = 1:size(M,1)
-    for j = 1:size(M,2)
-        % we first set the diag of the matrix to 0
-        M(i,j,:,:) = squeeze(M(i,j,:,:)) - diag(diag(squeeze(M(i,j,:,:))));
-        % we threthold the matrix at 30%
-        M(i,j,:,:) = threshold_proportional( squeeze(M(i,j,:,:)),.3);
-        % we binarize the weighted matrix to binary matrix
-        M(i,j,:,:) = weight_conversion( squeeze(M(i,j,:,:)),'binarize');
+% We threthold the network by 30% thretholds
+% And we also applied the analysis for thretholds ranging from 10% to 50%
+% for sensitivity analysis
+
+M_threthold = cell(1,5); % initiate the cell to store the arrays 
+thretholds = [0.1, 0.2, 0.3, 0.4, 0.5]; % define the thretholds to be ranging from 10% to 50%
+for k = 1:5
+    for i = 1:size(M,1)
+        for j = 1:size(M,2)
+            M_bin(i,j,:,:) = squeeze(M(i,j,:,:)) - diag(diag(squeeze(M(i,j,:,:)))); % set the diagnal to 0
+            M_bin(i,j,:,:) = threshold_proportional( squeeze(M_bin(i,j,:,:)),thretholds(k)); % thretholding the matrix
+            M_bin(i,j,:,:) = weight_conversion( squeeze(M_bin(i,j,:,:)),'binarize'); % binarize the thretholded matrix
+        end
     end
+    M_threthold{k} = M_bin; % store the array to the cells
 end
 
 
@@ -55,8 +60,6 @@ Visual = find(strcmp('Visual',node_key));
 unassigned = find(strcmp('unassigned',node_key));
 Frontoparietalsubcortical = [FrontoParietal; Reward];
 
-
-
 % 1st dim of M should be ses, 2nd should be win, third should be
 % nodes
 n_ses = size(M,1);
@@ -69,55 +72,102 @@ n_rep = 1000;
 
 % Empty matrices to store data
 modularity_mean = zeros(n_rep, n_ses); % Mean modularity
-modules = zeros(n_ses, n_rep, n_roi, n_win); % Module assigment labels    
+modules = zeros(n_ses, n_rep, n_roi, n_win); % Module assigment labels     
 
+% initiate the cell to store the modularity and modules for each thretholds
+modularity_mean_threth = cell(1,5);
+modules_threth = cell(1,5);
 
-for ses = 1 : n_ses
-%--- define objects ---------------------------------------------------
-    A = cell(1, n_win);
-    B = spalloc(n_roi * n_win, n_roi * n_win,(n_roi + n_win) * n_roi* n_win);
-    twomu = 0;
+% apply the modularity detection algorithm for each thretholds
+for m = 1:5
+    for ses = 1 : n_ses
+    %--- define objects ---------------------------------------------------
+        A = cell(1, n_win);
+        B = spalloc(n_roi * n_win, n_roi * n_win,(n_roi + n_win) * n_roi* n_win);
+        twomu = 0;
 
-    %--- null model -------------------------------------------------------
-    for win = 1 : n_win
-        %--- copy network  --------------
-        A{win} = squeeze(M(ses, win, :, :));
-        k = sum(A{win});                             % node degree
-        twom = sum(k);                               % mean network degree
-        twomu = twomu + twom;                        % increment
-        indx = [1:n_roi] + (win-1)*n_roi;            % find indices
-        B(indx,indx) = A{win} - gamma * [k'*k]/twom;  % fill B matrix
+        %--- null model -------------------------------------------------------
+        for win = 1 : n_win
+            %--- copy network  --------------
+            A{win} = squeeze(M_threthold{m}(ses, win, :, :));
+    %         A{win} = squeeze(M_weight(ses, win, :, :).* (M_weight(ses, win, :, :) > 0));
+            k = sum(A{win});                             % node degree
+            twom = sum(k);                               % mean network degree
+            twomu = twomu + twom;                        % increment
+            indx = [1:n_roi] + (win-1)*n_roi;            % find indices
+            B(indx,indx) = A{win} - gamma * [k'*k]/twom;  % fill B matrix
+        end
+        twomu = twomu + 2*omega* n_roi*(n_win-1);
+
+        B = B + omega/2*spdiags(ones(n_roi*n_win,2),[-n_roi, n_roi], n_roi*n_win, n_roi*n_win);
+        B = B + omega*spdiags(ones(n_roi*n_win,2),[-2*n_roi, 2*n_roi], n_roi*n_win, n_roi*n_win);
+        %B = B + omega * spdiags(ones(n_roi * n_win,2),[-n_roi, n_roi], n_roi*n_win, n_roi*n_win);
+
+    %--- calculate multilayer modules -------------------------------------
+        %Qb = 0;
+        for rep = 1 : n_rep
+            clc;
+            [S,Q] = genlouvain(B);
+            Q = Q / twomu;
+            S = reshape(S, n_roi, n_win);
+
+            modularity_mean(rep, ses) = Q;
+            modules(ses, rep, :, :) = S;
+       end
     end
-    twomu = twomu + 2*omega* n_roi*(n_win-1);
+    
+    modularity_mean_threth{m} = modularity_mean;
+    modules_threth{m} = modules;
+end
 
-    B = B + omega/2*spdiags(ones(n_roi*n_win,2),[-n_roi, n_roi], n_roi*n_win, n_roi*n_win);
-    B = B + omega*spdiags(ones(n_roi*n_win,2),[-2*n_roi, 2*n_roi], n_roi*n_win, n_roi*n_win);
-    %B = B + omega * spdiags(ones(n_roi * n_win,2),[-n_roi, n_roi], n_roi*n_win, n_roi*n_win);
-
-%--- calculate multilayer modules -------------------------------------
-    %Qb = 0;
-    for rep = 1 : n_rep
-        clc;
-        [S,Q] = genlouvain(B);
-        Q = Q / twomu;
-        S = reshape(S, n_roi, n_win);
-        
-        modularity_mean(rep, ses) = Q;
-        modules(ses, rep, :, :) = S;
-   end
+% we save the computed the modularity by averaging the modularities over
+% repetitions, and then store the modularities for each thresholds
+modularity_mean_threth_mean = zeros(3,5);
+for k = 1:5
+    modularity_mean_threth_mean(:,k) = mean(modularity_mean_threth{k},1);
 end
 
 %% flexibility
-for i = 1:size(modules,1)
-    for j = 1:size(modules,2)
-        nodes_flexibility(i,j,:) = flexibility(squeeze(modules(i, j, :, :))');
+flex_df = cell(1,5);
+for k = 1:5
+    for i = 1:size(modules_threth{k},1)
+        for j = 1:size(modules_threth{k},2)
+            nodes_flexibility(i,j,:) = flexibility(squeeze(modules_threth{k}(i, j, :, :))');
+        end
     end
+    
+    % following the suggestions from Bassett et al., (2011), we compute the flexibility over repetition
+    % of the modularity maximization process
+    
+    nodes_flexibility_mean = squeeze(mean(nodes_flexibility, 2));
+    nodes_mean_flexibility_mean = squeeze(mean(nodes_flexibility_mean, 2));
+
+    flex_bore_ml = squeeze(mean(nodes_flexibility_mean(1,:), 2))
+    flex_flow_ml = squeeze(mean(nodes_flexibility_mean(2,:), 2))
+    flex_frust_ml = squeeze(mean(nodes_flexibility_mean(3,:), 2))
+
+    flex_bore_ml_fron = squeeze(mean(nodes_flexibility_mean(1,FrontoParietal), 2))
+    flex_flow_ml_fron = squeeze(mean(nodes_flexibility_mean(2,FrontoParietal), 2))
+    flex_frust_ml_fron = squeeze(mean(nodes_flexibility_mean(3,FrontoParietal), 2))
+
+    flex_bore_ml_sub = squeeze(mean(nodes_flexibility_mean(1,Reward), 2))
+    flex_flow_ml_sub = squeeze(mean(nodes_flexibility_mean(2,Reward), 2))
+    flex_frust_ml_sub = squeeze(mean(nodes_flexibility_mean(3,Reward), 2))
+
+    flex_bore_ml_fron_sub = squeeze(mean(nodes_flexibility_mean(1,Frontoparietalsubcortical), 2))
+    flex_flow_ml_fron_sub = squeeze(mean(nodes_flexibility_mean(2,Frontoparietalsubcortical), 2))
+    flex_frust_ml_fron_sub = squeeze(mean(nodes_flexibility_mean(3,Frontoparietalsubcortical), 2))
+
+    flex = [flex_bore_ml flex_flow_ml flex_frust_ml;
+    flex_bore_ml_fron flex_flow_ml_fron flex_frust_ml_fron;
+    flex_bore_ml_sub flex_flow_ml_sub flex_frust_ml_sub;
+    flex_bore_ml_fron_sub flex_flow_ml_fron_sub flex_frust_ml_fron_sub];
+    flex_df{k} = flex;
 end
 
-% following the suggestions from Bassett et al., (2011), we compute the flexibility over repetition
-% of the modularity maximization process
-nodes_flexibility_mean = squeeze(mean(nodes_flexibility, 2));
-nodes_mean_flexibility_mean = squeeze(mean(nodes_flexibility_mean, 2));
+
+% we save the datasets for plotting
+% save('flex_df_threthold.mat', 'flex_df','modularity_mean_threth_mean', '-V6')
 
 
 %% null graph construction
@@ -489,17 +539,17 @@ adjusted_p = fdr_BH(p, .05);
 %% Generate the consensus community assignment 
 % first we compute the agreement matrix by agreement() in BCT toolbox
 agreement_bore = agreement([squeeze(modules(1,:,:,1))' squeeze(modules(1,:,:,2))' ...
-    squeeze(modules(1,:,:,3))' squeeze(modules(1,:,:,4))'])./4000;
+    squeeze(modules(1,:,:,3))' squeeze(modules(1,:,:,4))'])./400;
 % second we compute the consensus matrix by consensus_und() in BCT toolbox
 consensus_bore = consensus_und(agreement_bore, 0.6, 1000);
 
 % Then we repeate this for flow and frus
 agreement_flow = agreement([squeeze(modules(2,:,:,1))' squeeze(modules(2,:,:,2))' ...
-    squeeze(modules(2,:,:,3))' squeeze(modules(2,:,:,4))'])./4000;
+    squeeze(modules(2,:,:,3))' squeeze(modules(2,:,:,4))'])./400;
 consensus_flow = consensus_und(agreement_flow, 0.6, 1000);
 
 agreement_frus = agreement([squeeze(modules(3,:,:,1))' squeeze(modules(3,:,:,2))' ...
-    squeeze(modules(3,:,:,3))' squeeze(modules(3,:,:,4))'])./4000;
+    squeeze(modules(3,:,:,3))' squeeze(modules(3,:,:,4))'])./400;
 consensus_frus = consensus_und(agreement_frus, 0.6, 1000);
 
 % Then we gather them together and plot the consensus matrix
